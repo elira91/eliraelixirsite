@@ -705,14 +705,60 @@
 
   document.querySelectorAll('.reveal, .flourish').forEach(el => io.observe(el));
 
-  // contact form (front-end only demo)
-  const form = document.getElementById('contactForm');
-  const note = document.getElementById('formNote');
-  form.addEventListener('submit', (e) => {
+// contact form
+const form = document.getElementById('contactForm');
+const note = document.getElementById('formNote');
+
+if (form) {
+  form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    note.classList.add('show');
-    form.reset();
+
+    const submitButton = form.querySelector('button[type="submit"]');
+    const originalButtonText = submitButton.textContent;
+
+    submitButton.disabled = true;
+    submitButton.textContent = 'Sending...';
+
+    const formData = new FormData(form);
+
+    const data = {
+      name: formData.get('name'),
+      email: formData.get('email'),
+      message: formData.get('message')
+    };
+
+    try {
+      const response = await fetch('/api/contact', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(data)
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Something went wrong.');
+      }
+
+      note.textContent = 'Thank you — your message has been sent. We’ll be in touch soon.';
+      note.classList.add('show');
+
+      form.reset();
+
+    } catch (error) {
+      console.error('Contact form error:', error);
+
+      note.textContent = 'Sorry, your message could not be sent. Please try again.';
+      note.classList.add('show');
+
+    } finally {
+      submitButton.disabled = false;
+      submitButton.textContent = originalButtonText;
+    }
   });
+}
 </script>
 
 </body>
