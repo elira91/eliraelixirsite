@@ -1,41 +1,110 @@
-import { Resend } from 'resend';
-
-const resend = new Resend(process.env.RESEND_API_KEY);
+// api/contact.js
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { name, email, subject, message } = req.body;
+  const { name, email, message } = req.body;
 
   if (!name || !email || !message) {
-    return res.status(400).json({ error: 'All required fields must be filled out.' });
+    return res.status(400).json({
+      error: 'All required fields must be filled out.'
+    });
   }
 
   try {
-    const data = await resend.emails.send({
-      from: 'Elira Elixir Contact <onboarding@resend.dev>',
-      to: ['contact@eliraelixir.ca'],
-      subject: subject
-        ? `Elira Elixir Contact: ${subject}`
-        : `New Contact Form Inquiry from ${name}`,
-      reply_to: email,
-      html: `
-        <h3>New Contact Form Submission</h3>
+    // Get Microsoft Graph access token
+    const tokenResponse = await fetch(
+      `https://login.microsoftonline.com/${process.env.MS_TENANT_ID}/oauth2/v2.0/token`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: new URLSearchParams({
+          client_id: process.env.MS_CLIENT_ID,
+          client_secret: process.env.MS_CLIENT_SECRET,
+          scope: 'https://graph.microsoft.com/.default',
+          grant_type: 'client_credentials'
+        })
+      }
+    );
 
-        <p><strong>Name:</strong> ${name}</p>
-        <p><strong>Email:</strong> ${email}</p>
-        <p><strong>Subject:</strong> ${subject || 'No subject provided'}</p>
+    const tokenData = await tokenResponse.json();
 
-        <p><strong>Message:</strong></p>
-        <p>${message}</p>
-      `
+    if (!tokenResponse.ok) {
+      console.error('Microsoft token error:', tokenData);
+
+      return res.status(500).json({
+        error: 'Unable to authenticate with Microsoft.'
+      });
+    }
+
+    // Send email through Microsoft Graph
+    const graphResponse = await fetch(
+      `https://graph.microsoft.com/v1.0/users/${process.env.MS_SENDER_EMAIL}/sendMail`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${tokenData.access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          message: {
+            subject: `New Elira Elixir Contact Form Message from ${name}`,
+            body: {
+              contentType: 'HTML',
+              content: `
+                <h3>New Elira Elixir Contact Form Submission</h3>
+
+                <p><strong>Name:</strong> ${name}</p>
+                <p><strong>Email:</strong> ${email}</p>
+
+                <p><strong>Message:</strong></p>
+                <p>${message.replace(/\n/g, '<br>')}</p>
+              `
+            },
+            toRecipients: [
+              {
+                emailAddress: {
+                  address: process.env.MS_RECIPIENT_EMAIL
+                }
+              }
+            ],
+            replyTo: [
+              {
+                emailAddress: {
+                  address: email,
+                  name: name
+                }
+              }
+            ]
+          },
+          saveToSentItems: true
+        })
+      }
+    );
+
+    if (!graphResponse.ok) {
+      const graphError = await graphResponse.text();
+
+      console.error('Microsoft Graph error:', graphError);
+
+      return res.status(500).json({
+        error: 'Unable to send the message.'
+      });
+    }
+
+    return res.status(200).json({
+      success: true
     });
 
-    return res.status(200).json({ success: true, data });
   } catch (error) {
-    console.error('Resend error:', error);
-    return res.status(500).json({ error: 'Failed to send message.' });
+    console.error('Contact form error:', error);
+
+    return res.status(500).json({
+      error: 'Failed to send message.'
+    });
   }
 }
